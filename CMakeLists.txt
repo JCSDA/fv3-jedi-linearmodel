@@ -71,9 +71,12 @@ endif()
 
 # fms
 if (FV3_FORECAST_MODEL MATCHES "FV3CORE")
-  find_package( fms REQUIRED )
-  include_directories( ${FMS_INCLUDE_DIRS} )
-  list( APPEND FV3JEDILM_TPLS fms )
+  find_package(FMS 2023.04 REQUIRED COMPONENTS R4 R8)
+  if (FV3_PRECISION MATCHES DOUBLE OR NOT FV3_PRECISION)
+    add_library(fms ALIAS FMS::fms_r8)
+  else()
+    add_library(fms ALIAS FMS::fms_r4)
+  endif()
 endif()
 
 # geos
