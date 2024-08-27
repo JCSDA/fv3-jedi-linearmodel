@@ -52,7 +52,7 @@ else()
 endif()
 
 #openMP
-ecbuild_enable_omp()
+find_package( OpenMP COMPONENTS C Fortran )
 
 # MPI
 ecbuild_add_option( FEATURE MPI DEFAULT ON
