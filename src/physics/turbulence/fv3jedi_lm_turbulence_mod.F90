@@ -407,7 +407,7 @@ subroutine set_ltraj(conf,lcnst,traj,ltraj)
  p_ustar  (1:,1:) => traj%USTAR
  p_bstar  (1:,1:) => traj%BSTAR
 
- call get_tracer_index(traj, 'specific_humidity', it_qv)
+ call get_tracer_index(traj, 'water_vapor_mixing_ratio_wrt_moist_air', it_qv)
  p_qv     (1:,1:,1:) => traj%tracers(:,:,:,it_qv)
 
  !Compute pressures from delp
