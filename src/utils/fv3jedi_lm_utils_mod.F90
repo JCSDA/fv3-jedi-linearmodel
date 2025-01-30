@@ -55,6 +55,9 @@ type :: fv3jedi_lm_traj
   real(kind_real),     allocatable, dimension(:,:)     :: varflt, ustar, bstar
   real(kind_real),     allocatable, dimension(:,:)     :: zpbl, cm, ct, cq
   real(kind_real),     allocatable, dimension(:,:)     :: kcbl, ts, khl, khu
+  ! Stored winds
+  real(kind_real),     allocatable, dimension(:,:,:)   :: u_stored, v_stored
+  real(kind_real),     allocatable, dimension(:,:,:)   :: ua_stored, va_stored
 end type fv3jedi_lm_traj
 
 !> Compute ice fraction from temperature
@@ -235,8 +238,8 @@ subroutine deallocate_traj(traj)
 
  if (allocated(traj%u           )) deallocate(traj%u           )
  if (allocated(traj%v           )) deallocate(traj%v           )
- if (allocated(traj%ua          )) deallocate(traj%ua          )
- if (allocated(traj%va          )) deallocate(traj%va          )
+ !if (allocated(traj%ua          )) deallocate(traj%ua          )
+ !if (allocated(traj%va          )) deallocate(traj%va          )
  if (allocated(traj%t           )) deallocate(traj%t           )
  if (allocated(traj%delp        )) deallocate(traj%delp        )
  if (allocated(traj%tracers     )) deallocate(traj%tracers     )
@@ -261,6 +264,11 @@ subroutine deallocate_traj(traj)
  if (allocated(traj%ts          )) deallocate(traj%ts          )
  if (allocated(traj%khl         )) deallocate(traj%khl         )
  if (allocated(traj%khu         )) deallocate(traj%khu         )
+
+ if (allocated(traj%u_stored    )) deallocate(traj%u_stored    )
+ if (allocated(traj%v_stored    )) deallocate(traj%v_stored    )
+ if (allocated(traj%ua_stored   )) deallocate(traj%ua_stored   )
+ if (allocated(traj%va_stored   )) deallocate(traj%va_stored   )
 
 end subroutine deallocate_traj
 

@@ -7,6 +7,7 @@ use fv3jedi_lm_const_mod
 use fms_mod,         only: set_domain, nullify_domain
 use mpp_mod,         only: mpp_pe, mpp_root_pe, mpp_error, FATAL
 use mpp_domains_mod, only: mpp_update_domains, mpp_get_boundary, DGRID_NE, mpp_get_boundary_ad
+use fms_io_mod,      only: fms_io_init
 
 use fv_control_nlm_mod,     only: fv_init, pelist_all
 use fv_control_tlmadm_mod,  only: fv_init_pert
@@ -16,6 +17,11 @@ use fv_dynamics_nlm_mod,    only: fv_dynamics
 use fv_dynamics_tlm_mod,    only: fv_dynamics_tlm, fv_dynamics_nlm => fv_dynamics
 use fv_dynamics_adm_mod,    only: fv_dynamics_fwd, fv_dynamics_bwd
 use fv_pressure_mod,        only: compute_fv3_pressures, compute_fv3_pressures_tlm, compute_fv3_pressures_bwd
+
+use fms_io_mod,             only: restart_file_type, register_restart_field
+use fms_io_mod,             only: free_restart_type, restore_state, save_restart
+use fms_io_mod,             only: set_domain, nullify_domain
+use mpp_domains_mod,        only: east, north
 
 use tapenade_iter, only: cp_iter, cp_iter_controls, initialize_cp_iter, finalize_cp_iter
 use tapenade_iter, only: cp_mod_ini, cp_mod_mid, cp_mod_end, pushrealarray, poprealarray
@@ -36,8 +42,8 @@ public :: fv3jedi_lm_dynamics_type
 #endif
 
 type fv3jedi_lm_dynamics_type
- type(fv_atmos_type),      allocatable :: FV_Atm(:)          !<Traj FV3 structure
- type(fv_atmos_pert_type), allocatable :: FV_AtmP(:)         !<Pert FV3 structure
+ type(fv_atmos_type),      allocatable :: FV_Atm(:)       !<Traj FV3 structure
+ type(fv_atmos_pert_type), allocatable :: FV_AtmP(:)      !<Pert FV3 structure
  real(fvprec), allocatable, dimension(:,:) :: ebuffery    !<Halo holder
  real(fvprec), allocatable, dimension(:,:) :: nbufferx    !<Halo holder
  real(fvprec), allocatable, dimension(:,:) :: wbuffery    !<Halo holder
@@ -60,6 +66,9 @@ type fv3jedi_lm_dynamics_type
   procedure :: fv3_to_traj
   procedure :: pert_to_fv3
   procedure :: fv3_to_pert
+  procedure :: read_d_grid_winds
+  procedure :: write_d_grid_winds
+  procedure :: a_to_d_nl
 end type fv3jedi_lm_dynamics_type
 
 contains
@@ -234,6 +243,97 @@ subroutine init_nl(self,conf,pert,traj)
  call allocate_tracers(FV_Atm)
 
 endsubroutine init_nl
+
+! ------------------------------------------------------------------------------
+
+subroutine read_d_grid_winds(self, dpath, fname, traj)
+
+  ! Args
+  class(fv3jedi_lm_dynamics_type), intent(inout) :: self
+  character(len=*), intent(in) :: dpath, fname
+  type(fv3jedi_lm_traj), intent(inout) :: traj
+
+  ! Locals
+  integer :: idrst, isc, iec, jsc, jec, npz
+  type(restart_file_type) :: rst
+  real(kind=kind_real), allocatable, dimension(:,:,:) :: u, v
+
+  ! Initialize fms io
+  call fms_io_init()
+
+  ! Convenience
+  isc = self%isc
+  iec = self%iec
+  jsc = self%jsc
+  jec = self%jec
+  npz = self%npz
+
+  allocate ( u(isc:iec,  jsc:jec+1,npz) )
+  allocate ( v(isc:iec+1,jsc:jec  ,npz) )
+  u = 0.0_kind_real
+  v = 0.0_kind_real
+
+  ! Register the fields to read
+  idrst = register_restart_field(rst, trim(fname), 'u', u, domain=self%FV_Atm(1)%domain, position=north)
+  idrst = register_restart_field(rst, trim(fname), 'v', v, domain=self%FV_Atm(1)%domain, position=east )
+
+  ! Read and finalize
+  call restore_state(rst, directory=trim(adjustl(dpath)))
+  call free_restart_type(rst)
+
+  ! Now copy the data to the traj structure
+  traj%u(isc:iec, jsc:jec, 1:npz) = u(isc:iec, jsc:jec, 1:npz)
+  traj%v(isc:iec, jsc:jec, 1:npz) = v(isc:iec, jsc:jec, 1:npz)
+
+endsubroutine read_d_grid_winds
+
+! ------------------------------------------------------------------------------
+
+subroutine write_d_grid_winds(self, dpath, fname, traj)
+
+  ! Args
+  class(fv3jedi_lm_dynamics_type), intent(inout) :: self
+  character(len=*), intent(in) :: dpath, fname
+  type(fv3jedi_lm_traj), intent(inout) :: traj
+
+  ! Locals
+  integer :: idrst, isc, iec, jsc, jec, npz
+  type(restart_file_type) :: rst
+  real(kind=kind_real), allocatable, dimension(:,:,:) :: u, v
+
+  ! Initialize fms io
+  call fms_io_init()
+
+  ! Convenience
+  isc = self%isc
+  iec = self%iec
+  jsc = self%jsc
+  jec = self%jec
+  npz = self%npz
+
+  ! Allocate D-Grid winds with the correct array shapes and copy from traj
+  allocate ( u(isc:iec,  jsc:jec+1,npz) )
+  allocate ( v(isc:iec+1,jsc:jec  ,npz) )
+  u = 0.0_kind_real
+  v = 0.0_kind_real
+  u(isc:iec, jsc:jec, 1:npz) = traj%u(isc:iec, jsc:jec, 1:npz)
+  v(isc:iec, jsc:jec, 1:npz) = traj%v(isc:iec, jsc:jec, 1:npz)
+
+  ! Register the fields to write
+  idrst = register_restart_field( rst, trim(fname), &
+                                  'u', u, domain=self%FV_Atm(1)%domain, &
+                                  position=north, longname = "u_component_of_native_D_grid_wind", &
+                                  units = "ms-1" )
+  idrst = register_restart_field( rst, trim(fname), &
+                                  'v', v, domain=self%FV_Atm(1)%domain, &
+                                  position=east, longname = "v_component_of_native_D_grid_wind", &
+                                  units = "ms-1" )
+
+  ! Write and finalize
+  call save_restart(rst, directory=trim(adjustl(dpath)))
+  call free_restart_type(rst)
+
+endsubroutine write_d_grid_winds
 
 ! ------------------------------------------------------------------------------
 
@@ -1045,4 +1145,178 @@ subroutine allocate_tracersP(FV_AtmP, FV_Atm)
 endsubroutine allocate_tracersP
 
 ! ------------------------------------------------------------------------------
+
+subroutine a_to_d_nl(self, isc, iec, jsc, jec, npz, ua, va, ud, vd)
+
+! Args
+class(fv3jedi_lm_dynamics_type), target, intent(inout) :: self
+integer, intent(in) :: isc, iec, jsc, jec, npz
+real(kind=kind_real), intent(in)  :: ua(isc:iec, jsc:jec, npz)
+real(kind=kind_real), intent(in)  :: va(isc:iec, jsc:jec, npz)
+real(kind=kind_real), intent(out) :: ud(isc:iec, jsc:jec, npz)
+real(kind=kind_real), intent(out) :: vd(isc:iec, jsc:jec, npz)
+
+! Locals
+type(fv_atmos_type), pointer :: Atm(:)
+
+integer :: npx, npy
+integer :: i,j,k, im2,jm2
+
+real(kind_real), allocatable, dimension(:,:,:)   :: uatemp, vatemp
+
+real(kind=kind_real) :: v3(isc-1:iec+1,jsc-1:jec+1,3)
+real(kind=kind_real) :: ue(isc-1:iec+1,jsc  :jec+1,3)    ! 3D winds at edges
+real(kind=kind_real) :: ve(isc  :iec+1,jsc-1:jec+1,3)    ! 3D winds at edges
+real(kind=kind_real), dimension(isc:iec):: ut1, ut2, ut3
+real(kind=kind_real), dimension(jsc:jec):: vt1, vt2, vt3
+
+! Convenience to access the FV_Atm structure
+Atm => self%FV_Atm
+
+! Halfway points of the tiles
+im2 = (Atm(1)%npx-1)/2
+jm2 = (Atm(1)%npy-1)/2
+
+! Allocate uatemp and vatemp
+allocate(uatemp(Atm(1)%bd%isd:Atm(1)%bd%ied,Atm(1)%bd%jsd:Atm(1)%bd%jed,npz))
+allocate(vatemp(Atm(1)%bd%isd:Atm(1)%bd%ied,Atm(1)%bd%jsd:Atm(1)%bd%jed,npz))
+
+uatemp(:,:,:) = 0.0
+vatemp(:,:,:) = 0.0
+
+uatemp(isc:iec,jsc:jec,:) = ua(isc:iec,jsc:jec,:)
+vatemp(isc:iec,jsc:jec,:) = va(isc:iec,jsc:jec,:)
+
+call mpp_update_domains(uatemp, Atm(1)%domain, complete=.true.)
+call mpp_update_domains(vatemp, Atm(1)%domain, complete=.true.)
+
+do k=1, npz
+
+  do j=jsc-1,jec+1
+    do i=isc-1,iec+1
+      v3(i,j,1) = uatemp(i,j,k)*Atm(1)%gridstruct%vlon(i,j,1) + vatemp(i,j,k)*Atm(1)%gridstruct%vlat(i,j,1)
+      v3(i,j,2) = uatemp(i,j,k)*Atm(1)%gridstruct%vlon(i,j,2) + vatemp(i,j,k)*Atm(1)%gridstruct%vlat(i,j,2)
+      v3(i,j,3) = uatemp(i,j,k)*Atm(1)%gridstruct%vlon(i,j,3) + vatemp(i,j,k)*Atm(1)%gridstruct%vlat(i,j,3)
+    enddo
+  enddo
+
+  do j=jsc,jec+1
+    do i=isc-1,iec+1
+      ue(i,j,1) = v3(i,j-1,1) + v3(i,j,1)
+      ue(i,j,2) = v3(i,j-1,2) + v3(i,j,2)
+      ue(i,j,3) = v3(i,j-1,3) + v3(i,j,3)
+    enddo
+  enddo
+
+  do j=jsc-1,jec+1
+    do i=isc,iec+1
+      ve(i,j,1) = v3(i-1,j,1) + v3(i,j,1)
+      ve(i,j,2) = v3(i-1,j,2) + v3(i,j,2)
+      ve(i,j,3) = v3(i-1,j,3) + v3(i,j,3)
+    enddo
+  enddo
+
+
+  if ( isc==1 ) then
+    i = 1
+    do j=jsc,jec
+      if ( j>jm2 ) then
+        vt1(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j-1,1)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,1)
+        vt2(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j-1,2)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,2)
+        vt3(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j-1,3)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,3)
+      else
+        vt1(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j+1,1)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,1)
+        vt2(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j+1,2)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,2)
+        vt3(j) = Atm(1)%gridstruct%edge_vect_w(j)*ve(i,j+1,3)+(1.-Atm(1)%gridstruct%edge_vect_w(j))*ve(i,j,3)
+      endif
+    enddo
+    do j=jsc,jec
+      ve(i,j,1) = vt1(j)
+      ve(i,j,2) = vt2(j)
+      ve(i,j,3) = vt3(j)
+    enddo
+  endif
+
+  if ( (iec+1)==Atm(1)%npx ) then
+    i = Atm(1)%npx
+    do j=jsc,jec
+      if ( j>jm2 ) then
+        vt1(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j-1,1)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,1)
+        vt2(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j-1,2)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,2)
+        vt3(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j-1,3)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,3)
+      else
+        vt1(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j+1,1)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,1)
+        vt2(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j+1,2)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,2)
+        vt3(j) = Atm(1)%gridstruct%edge_vect_e(j)*ve(i,j+1,3)+(1.-Atm(1)%gridstruct%edge_vect_e(j))*ve(i,j,3)
+      endif
+    enddo
+    do j=jsc,jec
+      ve(i,j,1) = vt1(j)
+      ve(i,j,2) = vt2(j)
+      ve(i,j,3) = vt3(j)
+    enddo
+  endif
+
+  if ( jsc==1 ) then
+    j = 1
+    do i=isc,iec
+      if ( i>im2 ) then
+        ut1(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i-1,j,1)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,1)
+        ut2(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i-1,j,2)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,2)
+        ut3(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i-1,j,3)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,3)
+      else
+        ut1(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i+1,j,1)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,1)
+        ut2(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i+1,j,2)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,2)
+        ut3(i) = Atm(1)%gridstruct%edge_vect_s(i)*ue(i+1,j,3)+(1.-Atm(1)%gridstruct%edge_vect_s(i))*ue(i,j,3)
+      endif
+    enddo
+    do i=isc,iec
+      ue(i,j,1) = ut1(i)
+      ue(i,j,2) = ut2(i)
+      ue(i,j,3) = ut3(i)
+    enddo
+  endif
+
+  if ( (jec+1)==Atm(1)%npy ) then
+    j = Atm(1)%npy
+    do i=isc,iec
+      if ( i>im2 ) then
+        ut1(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i-1,j,1)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,1)
+        ut2(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i-1,j,2)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,2)
+        ut3(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i-1,j,3)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,3)
+      else
+        ut1(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i+1,j,1)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,1)
+        ut2(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i+1,j,2)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,2)
+        ut3(i) = Atm(1)%gridstruct%edge_vect_n(i)*ue(i+1,j,3)+(1.-Atm(1)%gridstruct%edge_vect_n(i))*ue(i,j,3)
+      endif
+    enddo
+    do i=isc,iec
+      ue(i,j,1) = ut1(i)
+      ue(i,j,2) = ut2(i)
+      ue(i,j,3) = ut3(i)
+    enddo
+  endif
+
+  do j=jsc,jec
+    do i=isc,iec
+      ud(i,j,k) = 0.5*( ue(i,j,1)*Atm(1)%gridstruct%es(1,i,j,1) +  &
+                        ue(i,j,2)*Atm(1)%gridstruct%es(2,i,j,1) +  &
+                        ue(i,j,3)*Atm(1)%gridstruct%es(3,i,j,1) )
+    enddo
+  enddo
+
+  do j=jsc,jec
+    do i=isc,iec
+      vd(i,j,k) = 0.5*( ve(i,j,1)*Atm(1)%gridstruct%ew(1,i,j,2) +  &
+                        ve(i,j,2)*Atm(1)%gridstruct%ew(2,i,j,2) +  &
+                        ve(i,j,3)*Atm(1)%gridstruct%ew(3,i,j,2) )
+    enddo
+  enddo
+
+enddo
+
+end subroutine a_to_d_nl
+
+! ------------------------------------------------------------------------------
+
 end module fv3jedi_lm_dynamics_mod

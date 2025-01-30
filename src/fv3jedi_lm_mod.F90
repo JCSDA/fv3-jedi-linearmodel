@@ -10,7 +10,7 @@ use fv3jedi_lm_physics_mod,  only: fv3jedi_lm_physics_type
 
 !> Combines fv3 tlm/adm with the GEOS tlm/adm physics
 !> All developed by NASA's Global Modeling and Assimilation Office
-!> daniel.holdaway@nasa.gov, Code 610.1 Goddard Space Flight Center, 
+!> daniel.holdaway@nasa.gov, Code 610.1 Goddard Space Flight Center,
 !> Greenbelt, MD 20771 USA
 
 implicit none
@@ -26,6 +26,11 @@ type fv3jedi_lm_type
  contains
   procedure :: create
   procedure :: allocate_tracers
+  procedure :: read_d_grid_winds
+  procedure :: write_d_grid_winds
+  procedure :: store_winds
+  procedure :: reinitialize_winds
+  procedure :: initialize_dwinds_from_awinds
   procedure :: init_nl
   procedure :: init_tl
   procedure :: init_ad
@@ -43,8 +48,6 @@ contains
 ! ------------------------------------------------------------------------------
 
 subroutine create(self,dt,npx,npy,npz,ptop,ak,bk)
-
- implicit none
 
  class(fv3jedi_lm_type), intent(inout) :: self
 
@@ -103,31 +106,128 @@ endsubroutine create
 
 ! ------------------------------------------------------------------------------
 
-subroutine allocate_tracers(self, isc, iec, jsc, jec, npz, ntracers, include_pert_tracers)
-
- implicit none
+subroutine allocate_tracers(self, ntracers, include_pert_tracers)
 
  class(fv3jedi_lm_type), intent(inout) :: self
- integer, intent(in) :: isc
- integer, intent(in) :: iec
- integer, intent(in) :: jsc
- integer, intent(in) :: jec
- integer, intent(in) :: npz
  integer, intent(in) :: ntracers
  logical, intent(in) :: include_pert_tracers
 
- call allocate_traj_tracers(self%traj, isc, iec, jsc, jec, npz, ntracers)
+ call allocate_traj_tracers(self%traj, self%conf%isc, self%conf%iec, self%conf%jsc, self%conf%jec, &
+                            self%conf%npz, ntracers)
  if (include_pert_tracers) then
-   call allocate_pert_tracers(self%pert, isc, iec, jsc, jec, npz, ntracers)
+   call allocate_pert_tracers(self%pert, self%conf%isc, self%conf%iec, self%conf%jsc, &
+                              self%conf%jec, self%conf%npz, ntracers)
  end if
 
 endsubroutine allocate_tracers
 
 ! ------------------------------------------------------------------------------
 
-subroutine init_nl(self)
+subroutine read_d_grid_winds(self, datapath, filename)
 
- implicit none
+  ! Args
+  class(fv3jedi_lm_type), intent(inout) :: self
+  character(len=*), intent(in) :: datapath, filename
+
+  ! Call dynamics restart init
+  call self%fv3jedi_lm_dynamics%read_d_grid_winds(datapath, filename, self%traj)
+
+endsubroutine read_d_grid_winds
+
+! ------------------------------------------------------------------------------
+
+subroutine write_d_grid_winds(self, datapath, filename)
+
+  ! Args
+  class(fv3jedi_lm_type), intent(inout) :: self
+  character(len=*), intent(in) :: datapath, filename
+
+  ! Call dynamics restart init
+  call self%fv3jedi_lm_dynamics%write_d_grid_winds(datapath, filename, self%traj)
+
+endsubroutine write_d_grid_winds
+
+! ------------------------------------------------------------------------------
+
+subroutine store_winds(self)
+
+  ! Args
+  class(fv3jedi_lm_type), intent(inout) :: self
+
+  ! Winds that are stored for use in reinitialize_winds
+  if (.not.allocated(self%traj%u_stored )) &
+    allocate(self%traj%u_stored (self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  if (.not.allocated(self%traj%v_stored )) &
+    allocate(self%traj%v_stored (self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  if (.not.allocated(self%traj%ua_stored)) &
+    allocate(self%traj%ua_stored(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  if (.not.allocated(self%traj%va_stored)) &
+    allocate(self%traj%va_stored(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+
+  self%traj%u_stored = self%traj%u
+  self%traj%v_stored = self%traj%v
+  self%traj%ua_stored = self%traj%ua
+  self%traj%va_stored = self%traj%va
+
+endsubroutine store_winds
+
+! ------------------------------------------------------------------------------
+
+subroutine reinitialize_winds(self)
+
+  ! Args
+  class(fv3jedi_lm_type), intent(inout) :: self
+
+  ! Locals
+  real(kind=kind_real), allocatable, dimension(:,:,:) :: ua_pert, va_pert
+  real(kind=kind_real), allocatable, dimension(:,:,:) :: ud_pert, vd_pert
+
+  ! Compute the difference between the current and stored A-Grid winds
+  allocate(ua_pert(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  allocate(va_pert(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  ua_pert = self%traj%ua - self%traj%ua_stored
+  va_pert = self%traj%va - self%traj%va_stored
+
+  ! Convert the perturbations to D-Grid
+  allocate(ud_pert(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  allocate(vd_pert(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  call self%fv3jedi_lm_dynamics%a_to_d_nl(self%conf%isc, self%conf%iec, self%conf%jsc, &
+                                       self%conf%jec, self%conf%npz, ua_pert, va_pert, ud_pert, &
+                                       vd_pert)
+
+  ! Add the D-Grid wind perturbation to the D-Grid winds in the trajectory
+  self%traj%u = self%traj%u_stored + ud_pert
+  self%traj%v = self%traj%v_stored + vd_pert
+
+endsubroutine reinitialize_winds
+
+! ------------------------------------------------------------------------------
+
+subroutine initialize_dwinds_from_awinds(self, ua, va)
+
+  ! Args
+  class(fv3jedi_lm_type), intent(inout) :: self
+  real(kind=kind_real),   intent(in)    :: ua(:,:,:)
+  real(kind=kind_real),   intent(in)    :: va(:,:,:)
+
+  ! Locals
+  real(kind=kind_real), allocatable, dimension(:,:,:) :: ud, vd
+
+  ! Convert the A-Grid winds to D-Grid
+  allocate(ud(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  allocate(vd(self%conf%isc:self%conf%iec, self%conf%jsc:self%conf%jec, self%conf%npz))
+  call self%fv3jedi_lm_dynamics%a_to_d_nl(self%conf%isc, self%conf%iec, self%conf%jsc, &
+                                          self%conf%jec, self%conf%npz, ua, va, ud, vd)
+
+  ! Initialize the D-Grid winds in the trajectory
+  self%traj%u = ud
+  self%traj%v = vd
+
+endsubroutine initialize_dwinds_from_awinds
+
+! ------------------------------------------------------------------------------
+
+subroutine init_nl(self)
 
  class(fv3jedi_lm_type), intent(inout) :: self
 
@@ -139,8 +239,6 @@ endsubroutine init_nl
 ! ------------------------------------------------------------------------------
 
 subroutine init_tl(self)
-
- implicit none
 
  class(fv3jedi_lm_type), intent(inout) :: self
 
@@ -155,8 +253,6 @@ endsubroutine init_tl
 
 subroutine init_ad(self)
 
- implicit none
-
  class(fv3jedi_lm_type), intent(inout) :: self
 
  call ipert_to_zero(self%pert)
@@ -170,8 +266,6 @@ endsubroutine init_ad
 
 subroutine step_nl(self)
 
- implicit none
-
  class(fv3jedi_lm_type), intent(inout) :: self
 
  if (self%conf%do_dyn == 1) call self%fv3jedi_lm_dynamics%step_nl(self%conf,self%traj)
@@ -182,8 +276,6 @@ endsubroutine step_nl
 ! ------------------------------------------------------------------------------
 
 subroutine step_tl(self)
-
- implicit none
 
  class(fv3jedi_lm_type), intent(inout) :: self
 
@@ -198,8 +290,6 @@ endsubroutine step_tl
 
 subroutine step_ad(self)
 
- implicit none
-
  class(fv3jedi_lm_type), intent(inout) :: self
 
  call ipert_to_zero(self%pert)
@@ -213,9 +303,7 @@ endsubroutine step_ad
 
 subroutine final_nl(self)
 
- implicit none
  class(fv3jedi_lm_type), intent(inout) :: self
-
 
 endsubroutine final_nl
 
@@ -223,7 +311,6 @@ endsubroutine final_nl
 
 subroutine final_tl(self)
 
- implicit none
  class(fv3jedi_lm_type), intent(inout) :: self
 
  call ipert_to_zero(self%pert)
@@ -234,7 +321,6 @@ endsubroutine final_tl
 
 subroutine final_ad(self)
 
- implicit none
  class(fv3jedi_lm_type), intent(inout) :: self
 
  call ipert_to_zero(self%pert)
@@ -244,8 +330,6 @@ endsubroutine final_ad
 ! ------------------------------------------------------------------------------
 
 subroutine delete(self)
-
- implicit none
 
  class(fv3jedi_lm_type), intent(inout) :: self
 
@@ -266,7 +350,6 @@ subroutine ipert_to_zero(pert)
 
  !> Intenal part of pert to zero
 
- implicit none
  type(fv3jedi_lm_pert), intent(inout) :: pert
 
  pert%ua = 0.0_kind_real
