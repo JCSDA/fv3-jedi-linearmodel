@@ -12,11 +12,11 @@ module nwp_nudge_nlm_mod
  use fv_timing_nlm_mod,     only: timing_on, timing_off
  use constants_mod,     only: pi, grav, rdgas, cp_air, kappa, radius
  use time_manager_mod,  only: time_type,  get_time, get_date
- use mpp_mod,           only: mpp_error, FATAL, stdlog
- use fms_mod,           only: write_version_number, open_namelist_file, &
-                              check_nml_error, file_exist, close_file,  &
-                              read_data, field_exist 
- use fms_io_mod,        only: field_size
+ use mpp_mod,           only: mpp_error, FATAL, stdlog, input_nml_file
+ use fms_mod,           only: write_version_number, check_nml_error
+ use fms2_io_mod,       only: FmsNetcdfFile_t, open_file, close_file, &
+                              read_data, file_exists, variable_exists, &
+                              get_variable_size
  use mpp_domains_mod,   only: mpp_update_domains
 
  implicit none
@@ -599,7 +599,8 @@ module nwp_nudge_nlm_mod
   real(FVPRC), intent(out), dimension(is:ie,js:je):: ts
   logical found
   integer tsize(4)
-  integer :: i, j, unit, io, ierr, nt, k
+  integer :: i, j, io, ierr, nt, k
+  type(FmsNetcdfFile_t) :: ncep_fileobj
 
    master = gid==masterproc
 
@@ -612,15 +613,8 @@ module nwp_nudge_nlm_mod
 
    track_file_name = "No_File_specified"
 
-    if( file_exist( 'input.nml' ) ) then
-       unit = open_namelist_file ()
-       io = 1
-       do while ( io .ne. 0 )
-          read( unit, nml = nwp_nudge_nml, iostat = io, end = 10 )
-          ierr = check_nml_error(io,'nwp_nudge_nml')
-       end do
-10     call close_file ( unit )
-    end if
+    read(input_nml_file, nml=nwp_nudge_nml, iostat=io)
+    ierr = check_nml_error(io, 'nwp_nudge_nml')
     call write_version_number (version, tagname)
     if ( master ) then
          write( stdlog(), nml = nwp_nudge_nml )
@@ -645,7 +639,14 @@ module nwp_nudge_nlm_mod
 
 ! Initialize remapping coefficients:
 
-    call field_size(file_names(1), 'T', tsize, field_found=found)
+    if (open_file(ncep_fileobj, file_names(1), 'read')) then
+      found = variable_exists(ncep_fileobj, 'T')
+      if (found) then
+        call get_variable_size(ncep_fileobj, 'T', tsize)
+      endif
+    else
+      found = .false.
+    endif
 
     if ( found ) then
          im = tsize(1); jm = tsize(2); km = tsize(3)
@@ -662,8 +663,8 @@ module nwp_nudge_nlm_mod
     allocate (  lon(im) )
     allocate (  lat(jm) )
 
-    call read_data (file_names(1), 'LAT', lat, no_domain=.true.)
-    call read_data (file_names(1), 'LON', lon, no_domain=.true.)
+    call read_data(ncep_fileobj, 'LAT', lat)
+    call read_data(ncep_fileobj, 'LON', lon)
 
 ! Convert to radian
     do i=1,im
@@ -676,8 +677,9 @@ module nwp_nudge_nlm_mod
     allocate ( ak0(km+1) )
     allocate ( bk0(km+1) )
 
-    call read_data (file_names(1), 'hyai', ak0, no_domain=.true.)
-    call read_data (file_names(1), 'hybi', bk0, no_domain=.true.)
+    call read_data(ncep_fileobj, 'hyai', ak0)
+    call read_data(ncep_fileobj, 'hybi', bk0)
+    call close_file(ncep_fileobj)
 
 ! Note: definition of NCEP hybrid is p(k) = a(k)*1.E5 + b(k)*ps
     ak0(:) = ak0(:) * 1.E5
@@ -737,18 +739,18 @@ module nwp_nudge_nlm_mod
   logical found
   logical:: read_ts = .true.
   logical:: land_ts = .false.
+  type(FmsNetcdfFile_t) :: analysis_fileobj
 
-  if( .not. file_exist(fname) ) then
-     call mpp_error(FATAL,'==> Error from get_ncep_analysis: file not found')
-  else
-     if(master) write(*,*) 'Reading NCEP anlysis file:', fname 
+  if (.not. open_file(analysis_fileobj, fname, 'read')) then
+     call mpp_error(FATAL,'==> Error from get_ncep_analysis: cannot open file '//trim(fname))
   endif
+  if(master) write(*,*) 'Reading NCEP analysis file:', fname
 
 !----------------------------------
 ! remap surface pressure and height:
 !----------------------------------
      allocate ( wk2(im,jm) )
-     call read_data (fname, 'PS', wk2, no_domain=.true.)
+     call read_data(analysis_fileobj, 'PS', wk2)
      if(gid==0) call pmaxmin( 'PS_ncep', wk2, im,  jm, 0.01)
 
      do j=js,je
@@ -761,7 +763,7 @@ module nwp_nudge_nlm_mod
         enddo
      enddo
 
-     call read_data (fname, 'PHIS', wk2, no_domain=.true.)
+     call read_data(analysis_fileobj, 'PHIS', wk2)
 !    if(gid==0) call pmaxmin( 'ZS_ncep', wk2, im,  jm, 1./grav)
      do j=js,je
         do i=is,ie
@@ -776,12 +778,12 @@ module nwp_nudge_nlm_mod
 
      if ( read_ts ) then       ! read skin temperature; could be used for SST
 
-      call read_data (fname, 'TS', wk2, no_domain=.true.)
+      call read_data(analysis_fileobj, 'TS', wk2)
 
       if ( .not. land_ts ) then
            allocate ( oro(im,jm) )
 ! Read NCEP ORO (1; land; 0: ocean; 2: sea_ice)
-           call read_data (fname, 'ORO', oro, no_domain=.true.)
+           call read_data(analysis_fileobj, 'ORO', oro)
 
            do j=1,jm
               tmean = 0.
@@ -846,7 +848,7 @@ module nwp_nudge_nlm_mod
 ! Winds:
    if ( nudge_winds ) then
 
-      call read_data (fname, 'U',  wk3, no_domain=.true.)
+      call read_data(analysis_fileobj, 'U', wk3)
       if( master ) call pmaxmin( 'U_ncep',   wk3, im*jm, km, 1.)
 
       do k=1,km
@@ -861,7 +863,7 @@ module nwp_nudge_nlm_mod
       enddo
       enddo
 
-      call read_data (fname, 'V',  wk3, no_domain=.true.)
+      call read_data(analysis_fileobj, 'V', wk3)
       if( master ) call pmaxmin( 'V_ncep',  wk3, im*jm, km, 1.)
       do k=1,km
       do j=js,je
@@ -880,7 +882,7 @@ module nwp_nudge_nlm_mod
    if ( nudge_t .or. nudge_virt .or. nudge_q .or. nudge_tpw .or. nudge_hght ) then
 
 ! Read in tracers: only sphum at this point
-      call read_data (fname, 'Q', wk3, no_domain=.true.)
+      call read_data(analysis_fileobj, 'Q', wk3)
       if(gid==1) call pmaxmin( 'Q_ncep',   wk3, im*jm, km, 1.)
       do k=1,km
       do j=js,je
@@ -894,7 +896,7 @@ module nwp_nudge_nlm_mod
       enddo
       enddo
 
-      call read_data (fname, 'T',  wk3, no_domain=.true.)
+      call read_data(analysis_fileobj, 'T', wk3)
       if(gid==0) call pmaxmin( 'T_ncep',   wk3, im*jm, km, 1.)
 
       do k=1,km
@@ -915,6 +917,7 @@ module nwp_nudge_nlm_mod
 
    deallocate ( wk3 ) 
 
+  call close_file(analysis_fileobj)
   nfile = nfile + 1
 
  end subroutine get_ncep_analysis

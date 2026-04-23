@@ -8,8 +8,6 @@ module external_ic_nlm_mod
    use amip_interp_mod,    only: i_sst, j_sst, sst_ncep
 #endif
    use fv_arrays_nlm_mod,  only: REAL4, REAL8, FVPRC
-   use fms_mod,            only: file_exist, read_data, field_exist
-   use fms_io_mod,         only: get_tile_string, field_size
    use mpp_mod,            only: mpp_error, FATAL, NOTE, mpp_broadcast,mpp_npes
    use mpp_parameter_mod,  only: AGRID_PARAM=>AGRID
    use mpp_domains_mod,    only: mpp_get_tile_id, domain2d, mpp_update_domains, mpp_get_boundary, DGRID_NE

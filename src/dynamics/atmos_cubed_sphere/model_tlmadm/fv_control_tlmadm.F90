@@ -30,7 +30,7 @@ module fv_control_tlmadm_mod
 
  use fv_arrays_nlm_mod,     only: fv_atmos_type
  use fv_arrays_tlmadm_mod, only: fv_atmos_pert_type, allocate_fv_atmos_pert_type, deallocate_fv_atmos_pert_type
- use fms_mod,           only: open_namelist_file, check_nml_error, close_file
+ use fms_mod,           only: check_nml_error
  use mpp_mod,           only: stdlog, mpp_pe, mpp_root_pe
 
  implicit none
@@ -202,14 +202,13 @@ module fv_control_tlmadm_mod
      if (file_exists) then
 
        ! Open the file
-       f_unit = open_namelist_file(inputpert_filename)
+       open(newunit=f_unit, file=trim(inputpert_filename), status='old', form='formatted', action='read')
 
        !Read linearized FVCORE namelist
-       rewind (f_unit)
        read (f_unit,fv_core_pert_nml,iostat=ios)
        ierr = check_nml_error(ios,'fv_core_pert_nml')
 
-       call close_file(f_unit)
+       close(f_unit)
 
        unit = stdlog()
        write(unit, nml=fv_core_pert_nml)

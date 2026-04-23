@@ -48,7 +48,7 @@
       use mpp_domains_mod, only : group_halo_update_type => mpp_group_update_type
       use mpp_parameter_mod, only : WUPDATE, EUPDATE, SUPDATE, NUPDATE, XUPDATE, YUPDATE
       use fv_arrays_nlm_mod, only: fv_atmos_type
-      use fms_io_mod, only: set_domain
+      use fms_mod, only: set_domain
       use mpp_mod, only : mpp_get_current_pelist, mpp_set_current_pelist
       use mpp_domains_mod, only : mpp_define_domains
       use mpp_domains_mod, only : mpp_define_nest_domains, nest_domain_type

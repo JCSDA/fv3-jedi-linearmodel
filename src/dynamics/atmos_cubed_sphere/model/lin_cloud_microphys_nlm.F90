@@ -11,8 +11,8 @@ module lin_cld_microphys_mod
  use diag_manager_mod,  only: register_diag_field, send_data
  use time_manager_mod,  only: time_type, get_time
  use constants_mod,     only: grav, rdgas, rvgas, cp_air, cp_vapor, hlv, hlf, kappa, pi !=>pi_8
- use fms_mod,           only: write_version_number, open_namelist_file, &
-                              check_nml_error, file_exist, close_file,  &
+ use fms_mod,           only: write_version_number, &
+                              check_nml_error, &
                               error_mesg, FATAL
   use fv_arrays_nlm_mod,  only: FVPRC
 
@@ -3340,20 +3340,8 @@ endif
 
     master = (mpp_pe().eq.mpp_root_pe())
 
-#ifdef INTERNAL_FILE_NML
     read( input_nml_file, nml = lin_cld_microphys_nml, iostat = io )
     ierr = check_nml_error(io,'lin_cloud_microphys_nml')
-#else
-    if( file_exist( 'input.nml' ) ) then
-       unit = open_namelist_file ()
-       io = 1
-       do while ( io .ne. 0 )
-          read( unit, nml = lin_cld_microphys_nml, iostat = io, end = 10 )
-          ierr = check_nml_error(io,'lin_cloud_microphys_nml')
-       end do
-10     call close_file ( unit )
-    end if
-#endif
     call write_version_number ('0.0', 'fv3-jedi-lm')
     logunit = stdlog()
 

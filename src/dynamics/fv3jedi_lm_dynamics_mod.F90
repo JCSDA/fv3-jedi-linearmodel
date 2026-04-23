@@ -5,9 +5,13 @@ use fv3jedi_lm_kinds_mod
 use fv3jedi_lm_const_mod
 
 use fms_mod,         only: set_domain, nullify_domain
+use fms2_io_mod,     only: FmsNetcdfDomainFile_t, open_file, close_file, &
+                           register_restart_field, register_axis, &
+                           read_restart, write_restart, unlimited, &
+                           register_variable_attribute
 use mpp_mod,         only: mpp_pe, mpp_root_pe, mpp_error, FATAL
-use mpp_domains_mod, only: mpp_update_domains, mpp_get_boundary, DGRID_NE, mpp_get_boundary_ad
-use fms_io_mod,      only: fms_io_init
+use mpp_domains_mod, only: mpp_update_domains, mpp_get_boundary, DGRID_NE, mpp_get_boundary_ad, &
+                           east, north, center
 
 use fv_control_nlm_mod,     only: fv_init, pelist_all
 use fv_control_tlmadm_mod,  only: fv_init_pert
@@ -18,10 +22,7 @@ use fv_dynamics_tlm_mod,    only: fv_dynamics_tlm, fv_dynamics_nlm => fv_dynamic
 use fv_dynamics_adm_mod,    only: fv_dynamics_fwd, fv_dynamics_bwd
 use fv_pressure_mod,        only: compute_fv3_pressures, compute_fv3_pressures_tlm, compute_fv3_pressures_bwd
 
-use fms_io_mod,             only: restart_file_type, register_restart_field
-use fms_io_mod,             only: free_restart_type, restore_state, save_restart
-use fms_io_mod,             only: set_domain, nullify_domain
-use mpp_domains_mod,        only: east, north
+
 
 use tapenade_iter, only: cp_iter, cp_iter_controls, initialize_cp_iter, finalize_cp_iter
 use tapenade_iter, only: cp_mod_ini, cp_mod_mid, cp_mod_end, pushrealarray, poprealarray
@@ -254,12 +255,10 @@ subroutine read_d_grid_winds(self, dpath, fname, traj)
   type(fv3jedi_lm_traj), intent(inout) :: traj
 
   ! Locals
-  integer :: idrst, isc, iec, jsc, jec, npz
-  type(restart_file_type) :: rst
+  integer :: isc, iec, jsc, jec, npz
+  type(FmsNetcdfDomainFile_t) :: rst
+  character(len=512) :: fpath
   real(kind=kind_real), allocatable, dimension(:,:,:) :: u, v
-
-  ! Initialize fms io
-  call fms_io_init()
 
   ! Convenience
   isc = self%isc
@@ -273,13 +272,24 @@ subroutine read_d_grid_winds(self, dpath, fname, traj)
   u = 0.0_kind_real
   v = 0.0_kind_real
 
-  ! Register the fields to read
-  idrst = register_restart_field(rst, trim(fname), 'u', u, domain=self%FV_Atm(1)%domain, position=north)
-  idrst = register_restart_field(rst, trim(fname), 'v', v, domain=self%FV_Atm(1)%domain, position=east )
+  ! Build the full file path
+  fpath = trim(adjustl(dpath))//'/'//trim(fname)
 
-  ! Read and finalize
-  call restore_state(rst, directory=trim(adjustl(dpath)))
-  call free_restart_type(rst)
+  ! Open, register, read, close
+  if (open_file(rst, trim(fpath), 'read', self%FV_Atm(1)%domain, is_restart=.true.)) then
+    call register_axis(rst, 'xaxis_1', 'x', domain_position=center)
+    call register_axis(rst, 'xaxis_2', 'x', domain_position=east)
+    call register_axis(rst, 'yaxis_1', 'y', domain_position=north)
+    call register_axis(rst, 'yaxis_2', 'y', domain_position=center)
+    call register_axis(rst, 'zaxis_1', npz)
+    call register_axis(rst, 'Time', unlimited)
+     
+    call register_restart_field(rst, 'u', u, (/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time   '/))
+    call register_restart_field(rst, 'v', v, (/'xaxis_2', 'yaxis_2', 'zaxis_1', 'Time   '/))
+
+    call read_restart(rst)
+    call close_file(rst)
+  endif
 
   ! Now copy the data to the traj structure
   traj%u(isc:iec, jsc:jec, 1:npz) = u(isc:iec, jsc:jec, 1:npz)
@@ -297,12 +307,10 @@ subroutine write_d_grid_winds(self, dpath, fname, traj)
   type(fv3jedi_lm_traj), intent(inout) :: traj
 
   ! Locals
-  integer :: idrst, isc, iec, jsc, jec, npz
-  type(restart_file_type) :: rst
+  integer :: isc, iec, jsc, jec, npz
+  type(FmsNetcdfDomainFile_t) :: rst
   real(kind=kind_real), allocatable, dimension(:,:,:) :: u, v
-
-  ! Initialize fms io
-  call fms_io_init()
+  character(len=512) :: fpath
 
   ! Convenience
   isc = self%isc
@@ -319,19 +327,29 @@ subroutine write_d_grid_winds(self, dpath, fname, traj)
   u(isc:iec, jsc:jec, 1:npz) = traj%u(isc:iec, jsc:jec, 1:npz)
   v(isc:iec, jsc:jec, 1:npz) = traj%v(isc:iec, jsc:jec, 1:npz)
 
-  ! Register the fields to write
-  idrst = register_restart_field( rst, trim(fname), &
-                                  'u', u, domain=self%FV_Atm(1)%domain, &
-                                  position=north, longname = "u_component_of_native_D_grid_wind", &
-                                  units = "ms-1" )
-  idrst = register_restart_field( rst, trim(fname), &
-                                  'v', v, domain=self%FV_Atm(1)%domain, &
-                                  position=east, longname = "v_component_of_native_D_grid_wind", &
-                                  units = "ms-1" )
+  ! Build full file path
+  fpath = trim(adjustl(dpath))//'/'//trim(fname)
 
-  ! Write and finalize
-  call save_restart(rst, directory=trim(adjustl(dpath)))
-  call free_restart_type(rst)
+  ! Open, register axes and fields, write, close
+  if (open_file(rst, trim(fpath), 'overwrite', self%FV_Atm(1)%domain, is_restart=.true.)) then
+    call register_axis(rst, 'xaxis_1', 'x', domain_position=center)
+    call register_axis(rst, 'xaxis_2', 'x', domain_position=east)
+    call register_axis(rst, 'yaxis_1', 'y', domain_position=north)
+    call register_axis(rst, 'yaxis_2', 'y', domain_position=center)
+    call register_axis(rst, 'zaxis_1', npz)
+    call register_axis(rst, 'Time', unlimited)
+
+    call register_restart_field(rst, 'u', u, (/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time   '/))
+    call register_variable_attribute(rst, 'u', 'long_name', 'u_component_of_native_D_grid_wind', str_len=len('u_component_of_native_D_grid_wind'))
+    call register_variable_attribute(rst, 'u', 'units', 'ms-1', str_len=len('ms-1'))
+ 
+    call register_restart_field(rst, 'v', v, (/'xaxis_2', 'yaxis_2', 'zaxis_1', 'Time   '/))
+    call register_variable_attribute(rst, 'v', 'units', 'ms-1', str_len=len('ms-1'))
+    call register_variable_attribute(rst, 'v', 'long_name', 'v_component_of_native_D_grid_wind', str_len=len('v_component_of_native_D_grid_wind'))
+
+    call write_restart(rst)
+    call close_file(rst)
+  endif
 
 endsubroutine write_d_grid_winds
 

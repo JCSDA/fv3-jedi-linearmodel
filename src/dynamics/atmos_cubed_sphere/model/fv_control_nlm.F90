@@ -26,8 +26,9 @@ module fv_control_nlm_mod
 
    use constants_mod,       only: pi=>pi_8, kappa, radius, grav, rdgas
    use field_manager_mod,   only: MODEL_ATMOS
-   use fms_mod,             only: write_version_number, open_namelist_file, &
-                                  check_nml_error, close_file, file_exist
+   use fms_mod,             only: write_version_number, &
+                                  check_nml_error
+   use fms2_io_mod,         only: file_exists
    use mpp_mod,             only: FATAL, mpp_error, mpp_pe, stdlog, &
                                   mpp_npes, mpp_get_current_pelist, &
                                   input_nml_file, get_unit, WARNING, &
@@ -597,7 +598,6 @@ module fv_control_nlm_mod
         !call mpp_error(FATAL,'FV core terminating 1')
      !endif
 
-#ifdef INTERNAL_FILE_NML
 !      rewind (f_unit)
    ! Read Main namelist
       read (input_nml_file,fv_grid_nml,iostat=ios)
@@ -605,15 +605,6 @@ module fv_control_nlm_mod
    ! Read Test_Case namelist
       read (input_nml_file,test_case_nml,iostat=ios)
       ierr = check_nml_error(ios,'test_case_nml')
-#else
-      f_unit=open_namelist_file()
-      rewind (f_unit)
-   ! Read Main namelist
-      read (f_unit,fv_grid_nml,iostat=ios)
-      ierr = check_nml_error(ios,'fv_grid_nml')
-      rewind (f_unit)
-      call close_file(f_unit)
-#endif
 
       unit = stdlog()
       write(unit, nml=fv_grid_nml)
@@ -627,9 +618,8 @@ module fv_control_nlm_mod
             call fv_diag_init_gn(Atm(n))
          endif
 
-#ifdef INTERNAL_FILE_NML
          if (size(Atm) > 1) then
-            call mpp_error(FATAL, "Nesting not implemented with INTERNAL_FILE_NML")
+            call mpp_error(FATAL, "Nesting not implemented")
          endif
    ! Read FVCORE namelist
       read (input_nml_file,fv_core_nml,iostat=ios)
@@ -650,41 +640,6 @@ module fv_control_nlm_mod
       else
         atm(n)%fdiag = fdiag
       endif
-#endif
-#else
-      if (size(Atm) == 1) then
-         f_unit = open_namelist_file()
-      else if (n == 1) then
-         f_unit = open_namelist_file('input.nml')
-      else
-         write(nested_grid_filename,'(A10, I2.2, A4)') 'input_nest', n, '.nml'
-         f_unit = open_namelist_file(nested_grid_filename)
-      endif
-
-   ! Read FVCORE namelist
-      read (f_unit,fv_core_nml,iostat=ios)
-      ierr = check_nml_error(ios,'fv_core_nml')
-
-   ! Read Test_Case namelist
-      rewind (f_unit)
-      read (f_unit,test_case_nml,iostat=ios)
-      ierr = check_nml_error(ios,'test_case_nml')
-#ifdef GFS_PHYS
-   ! Read NGGPS_DIAG namelist
-      rewind (f_unit)
-      read (f_unit,nggps_diag_nml,iostat=ios)
-      ierr = check_nml_error(ios,'nggps_diag_nml')
-!--- check fdiag to see if it is an interval or a list
-      if (nint(fdiag(2)) == 0) then
-        Atm(n)%fdiag(1) = fdiag(1)
-        do i = 2, size(fdiag,1)
-          Atm(n)%fdiag(i) = Atm(n)%fdiag(i-1) + fdiag(1)
-        enddo
-      else
-        atm(n)%fdiag = fdiag
-      endif
-#endif
-      call close_file(f_unit)
 #endif
           if (len_trim(grid_file) /= 0) Atm(n)%flagstruct%grid_file = grid_file
           if (len_trim(grid_name) /= 0) Atm(n)%flagstruct%grid_name = grid_name
@@ -979,16 +934,8 @@ module fv_control_nlm_mod
     nest_pes = 0
     ntiles = -999
 
-#ifdef INTERNAL_FILE_NML
       read (input_nml_file,nest_nml,iostat=ios)
       ierr = check_nml_error(ios,'nest_nml')
-#else
-      f_unit=open_namelist_file()
-      rewind (f_unit)
-      read (f_unit,nest_nml,iostat=ios)
-      ierr = check_nml_error(ios,'nest_nml')
-      call close_file(f_unit)
-#endif
 
       if (ntiles /= -999) ngrids = ntiles
       if (ngrids > 10) call mpp_error(FATAL, "More than 10 nested grids not supported")
@@ -1036,7 +983,7 @@ module fv_control_nlm_mod
                if (n > 1) then
                   call mpp_declare_pelist(Atm(n)%pelist, trim(pe_list_name))
                   !Make sure nested-grid input file exists
-                  if (.not. file_exist('input_'//trim(pe_list_name)//'.nml')) then
+                  if (.not. file_exists('input_'//trim(pe_list_name)//'.nml')) then
                      call mpp_error(FATAL, "Could not find nested grid namelist input_"//trim(pe_list_name)//".nml")
                   endif
                endif
@@ -1051,7 +998,7 @@ module fv_control_nlm_mod
                call mpp_declare_pelist(Atm(n)%pelist, trim(pe_list_name))
                !Make sure nested-grid input file exists
                if (n > 1) then
-                  if (.not. file_exist('input_'//trim(pe_list_name)//'.nml')) then
+                  if (.not. file_exists('input_'//trim(pe_list_name)//'.nml')) then
                      call mpp_error(FATAL, "Could not find nested grid namelist input_"//trim(pe_list_name)//".nml")
                   endif
                endif
@@ -1068,11 +1015,7 @@ module fv_control_nlm_mod
                   !masterproc = Atm(n)%pelist(1)
                   call setup_master(Atm(n)%pelist)
                   grids_on_this_pe(n) = .true.
-#if defined (INTERNAL_FILE_NML)
                   if (n > 1) call read_input_nml
-#else
-                  !Namelist file read in fv_control_nlm.F90
-#endif
                   exit
                endif
          enddo

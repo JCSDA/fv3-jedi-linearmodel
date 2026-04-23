@@ -55,7 +55,7 @@ module fv_restart_nlm_mod
   use mpp_mod,             only: mpp_send, mpp_recv, mpp_sync_self, mpp_set_current_pelist, mpp_get_current_pelist, mpp_npes, mpp_pe, mpp_sync
   use mpp_domains_mod,     only: CENTER, CORNER, NORTH, EAST,  mpp_get_C2F_index, WEST, SOUTH
   use mpp_domains_mod,     only: mpp_global_field
-  use fms_mod,             only: file_exist
+  use fms2_io_mod,         only: file_exists
 
   implicit none
   private
@@ -142,8 +142,8 @@ contains
              Atm(n)%flagstruct%warm_start = .false. !resetting warm_start flag to avoid FATAL error below
           else
              if (is_master()) print*, 'Searching for nested grid restart file ', trim(fname)
-             cold_start_grids(n) = .not. file_exist(fname, Atm(n)%domain)
-             Atm(n)%flagstruct%warm_start = file_exist(fname, Atm(n)%domain)!resetting warm_start flag to avoid FATAL error below
+             cold_start_grids(n) = .not. file_exists(fname)
+             Atm(n)%flagstruct%warm_start = file_exists(fname)!resetting warm_start flag to avoid FATAL error below
           endif
        endif
 
@@ -173,7 +173,7 @@ contains
                 if (is_master()) print*, 'Searching for nested grid BC files ', trim(fname_ne), ' ', trim (fname_sw)
 
                 !!!! PROBLEM: file_exist doesn't know to look for fv_BC_ne.res.nest02.nc instead of fv_BC_ne.res.nc on coarse grid
-                if (file_exist(fname_ne, Atm(n)%domain) .and. file_exist(fname_sw, Atm(n)%domain)) then
+                if (file_exists(fname_ne) .and. file_exists(fname_sw)) then
                 else
                    if ( is_master() ) write(*,*) 'BC files not found, re-generating nested grid boundary conditions'
                    call fill_nested_grid_topo_halo(Atm(n), .false.)
@@ -272,7 +272,7 @@ contains
              else
                 !If BC file is found, then read them in. Otherwise we need to initialize the BCs.
                 if (is_master()) print*, 'Searching for nested grid BC files ', trim(fname_ne), ' ', trim (fname_sw)
-                if (file_exist(fname_ne, Atm(n)%domain) .and. file_exist(fname_sw, Atm(n)%domain)) then
+                if (file_exists(fname_ne) .and. file_exists(fname_sw)) then
                    call fv_io_read_BCs(Atm(n))
                 else
                    if ( is_master() ) write(*,*) 'BC files not found, re-generating nested grid boundary conditions'
