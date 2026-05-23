@@ -50,7 +50,7 @@ module fv_control_nlm_mod
    use fv_eta_nlm_mod,          only: set_eta
    use fv_grid_tools_nlm_mod,   only: init_grid
    use fv_mp_nlm_mod,           only: mp_start, mp_assign_gid, domain_decomp
-   use fv_mp_nlm_mod,           only: ng, switch_current_Atm
+   use fv_mp_nlm_mod,           only: ng
    use fv_mp_nlm_mod,           only: broadcast_domains, mp_barrier, is_master, setup_master
 !!! CLEANUP: should be replaced by a getter function?
    use test_cases_nlm_mod,      only: test_case, bubble_do, alpha, nsolitons, soliton_Umax, soliton_size
@@ -279,7 +279,6 @@ module fv_control_nlm_mod
    call init_nesting(Atm, grids_on_this_pe, p_split)
 
    !This call is needed to set up the pointers for fv_current_grid, even for a single-grid run
-   !call switch_current_Atm(Atm(1), .false.)
    call setup_pointers(Atm(1))
 
 ! Start up MPI
@@ -298,7 +297,6 @@ module fv_control_nlm_mod
       do n=1,ntilesMe
 
          !In a single-grid run this will still be needed to correctly set the domain
-         call switch_current_Atm(Atm(n))
          call setup_pointers(Atm(n))
 
          target_lon = target_lon * pi/180.
@@ -322,7 +320,6 @@ module fv_control_nlm_mod
 
             if (grids_on_this_pe(n)) then
 
-               call switch_current_Atm(Atm(n))
                call setup_pointers(Atm(n))
 
                if ( (Atm(n)%bd%iec-Atm(n)%bd%isc+1).lt.4 .or. (Atm(n)%bd%jec-Atm(n)%bd%jsc+1).lt.4 ) then
@@ -486,7 +483,6 @@ module fv_control_nlm_mod
 !         if(is_master()) write(*,*) "Hybrid sigma-p coordinate has been reset"
 !     endif
 
-      if (ntilesMe > 1) call switch_current_Atm(Atm(1))
       if (ntilesMe > 1) call setup_pointers(Atm(1))
 
  end subroutine fv_init
@@ -611,7 +607,6 @@ module fv_control_nlm_mod
 
       do n=1,size(Atm)
 
-         call switch_current_Atm(Atm(n), .false.)
          call setup_pointers(Atm(n))
          Atm(n)%grid_number = n
          if (grids_on_this_pe(n)) then
@@ -842,7 +837,6 @@ module fv_control_nlm_mod
 
    do n=1,size(Atm)
 
-      call switch_current_Atm(Atm(n),.false.)
       call setup_pointers(Atm(n))
       !! CLEANUP: WARNING not sure what changes to domain_decomp may cause
       call domain_decomp(npx,npy,ntiles,grid_type,nested,Atm(n),layout,io_layout)
@@ -854,7 +848,6 @@ module fv_control_nlm_mod
    call broadcast_domains(Atm)
 
    do n=1,size(Atm)
-      call switch_current_Atm(Atm(n))
       call setup_pointers(Atm(n))
 
       if (nested) then

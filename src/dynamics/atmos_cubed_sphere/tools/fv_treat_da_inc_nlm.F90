@@ -15,8 +15,6 @@
 
 module fv_treat_da_inc_nlm_mod
 
-  use fms_mod,           only: file_exist, read_data, &
-                               field_exist, write_version_number
   use mpp_mod,           only: mpp_error, FATAL, NOTE, mpp_pe
   use mpp_domains_mod,   only: mpp_get_tile_id, &
                                domain2d, &
@@ -331,7 +329,7 @@ contains
     real(kind=R_GRID), dimension(2):: p1, p2, p3
     real(kind=R_GRID), dimension(3):: e1, e2, ex, ey
 
-    logical:: found
+    logical:: found, file_exists
     integer :: is,  ie,  js,  je
     integer :: isd, ied, jsd, jed
     integer :: sphum, liq_wat, o3mr
@@ -351,7 +349,8 @@ contains
 
     fname = 'INPUT/'//Atm(1)%flagstruct%res_latlon_dynamics
 
-    if( file_exist(fname) ) then
+    inquire(file=trim(fname), exist=file_exists)
+    if( file_exists ) then
       call open_ncfile( fname, ncid )        ! open the file
       call get_ncdim1( ncid, 'lon',   tsize(1) )
       call get_ncdim1( ncid, 'lat',   tsize(2) )

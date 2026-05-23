@@ -4,11 +4,12 @@ use fv3jedi_lm_utils_mod
 use fv3jedi_lm_kinds_mod
 use fv3jedi_lm_const_mod
 
-use fms_mod,         only: set_domain, nullify_domain
 use fms2_io_mod,     only: FmsNetcdfDomainFile_t, open_file, close_file, &
-                           register_restart_field, register_axis, &
+                           register_restart_field, register_axis, register_field, &
                            read_restart, write_restart, unlimited, &
-                           register_variable_attribute
+                           register_variable_attribute, get_variable_num_dimensions, is_dimension_registered, &
+                           get_num_dimensions, dimension_exists, get_variable_dimension_names, &
+                           get_dimension_size, get_dimension_names
 use mpp_mod,         only: mpp_pe, mpp_root_pe, mpp_error, FATAL
 use mpp_domains_mod, only: mpp_update_domains, mpp_get_boundary, DGRID_NE, mpp_get_boundary_ad, &
                            east, north, center
@@ -277,15 +278,8 @@ subroutine read_d_grid_winds(self, dpath, fname, traj)
 
   ! Open, register, read, close
   if (open_file(rst, trim(fpath), 'read', self%FV_Atm(1)%domain, is_restart=.true.)) then
-    call register_axis(rst, 'xaxis_1', 'x', domain_position=center)
-    call register_axis(rst, 'xaxis_2', 'x', domain_position=east)
-    call register_axis(rst, 'yaxis_1', 'y', domain_position=north)
-    call register_axis(rst, 'yaxis_2', 'y', domain_position=center)
-    call register_axis(rst, 'zaxis_1', npz)
-    call register_axis(rst, 'Time', unlimited)
-     
-    call register_restart_field(rst, 'u', u, (/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time   '/))
-    call register_restart_field(rst, 'v', v, (/'xaxis_2', 'yaxis_2', 'zaxis_1', 'Time   '/))
+    call fv3jedi_register_field(rst, 'u', u, north, .true.)
+    call fv3jedi_register_field(rst, 'v', v, east, .true.)
 
     call read_restart(rst)
     call close_file(rst)
@@ -332,20 +326,8 @@ subroutine write_d_grid_winds(self, dpath, fname, traj)
 
   ! Open, register axes and fields, write, close
   if (open_file(rst, trim(fpath), 'overwrite', self%FV_Atm(1)%domain, is_restart=.true.)) then
-    call register_axis(rst, 'xaxis_1', 'x', domain_position=center)
-    call register_axis(rst, 'xaxis_2', 'x', domain_position=east)
-    call register_axis(rst, 'yaxis_1', 'y', domain_position=north)
-    call register_axis(rst, 'yaxis_2', 'y', domain_position=center)
-    call register_axis(rst, 'zaxis_1', npz)
-    call register_axis(rst, 'Time', unlimited)
-
-    call register_restart_field(rst, 'u', u, (/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time   '/))
-    call register_variable_attribute(rst, 'u', 'long_name', 'u_component_of_native_D_grid_wind', str_len=len('u_component_of_native_D_grid_wind'))
-    call register_variable_attribute(rst, 'u', 'units', 'ms-1', str_len=len('ms-1'))
- 
-    call register_restart_field(rst, 'v', v, (/'xaxis_2', 'yaxis_2', 'zaxis_1', 'Time   '/))
-    call register_variable_attribute(rst, 'v', 'units', 'ms-1', str_len=len('ms-1'))
-    call register_variable_attribute(rst, 'v', 'long_name', 'v_component_of_native_D_grid_wind', str_len=len('v_component_of_native_D_grid_wind'))
+    call fv3jedi_register_field(rst, 'u', u, north, .true., 'u_component_of_native_D_grid_wind', 'ms-1')
+    call fv3jedi_register_field(rst, 'v', v, east, .true., 'v_component_of_native_D_grid_wind', 'ms-1')
 
     call write_restart(rst)
     call close_file(rst)
@@ -432,10 +414,6 @@ subroutine step_nl(self,conf,traj)
  !-----------------------------------
  call traj_to_fv3(self,conf,traj)
 
- ! MPP set domain
- ! --------------
- call set_domain(FV_Atm(1)%domain)
-
  !Propagate FV3 one time step
  !---------------------------
  if (self%linmodtest == 0) then
@@ -473,10 +451,6 @@ subroutine step_nl(self,conf,traj)
                           FV_Atm(1)%domain )
  endif
 
-
- ! MPP nulify
- ! ----------
- call nullify_domain()
 
  !Copy from fv3 back to traj structure
  !------------------------------------
@@ -554,11 +528,6 @@ subroutine step_tl(self,conf,traj,pert)
                                  FV_Atm(1)%peln, FV_AtmP(1)%pelnp )
 
 
- ! MPP set domain
- ! --------------
- call set_domain(FV_Atm(1)%domain)
-
-
  !Propagate TLM one time step
  !---------------------------
  call fv_dynamics_tlm(FV_Atm(1)%npx, FV_Atm(1)%npy, FV_Atm(1)%npz, FV_Atm(1)%ncnst, FV_Atm(1)%ng,                      &
@@ -579,11 +548,6 @@ subroutine step_tl(self,conf,traj,pert)
                       FV_Atm(1)%cx, FV_AtmP(1)%cxp, FV_Atm(1)%cy,  FV_AtmP(1)%cyp, FV_Atm(1)%ze0,                       &
                       FV_Atm(1)%flagstruct%hybrid_z, FV_Atm(1)%gridstruct, FV_Atm(1)%flagstruct, FV_AtmP(1)%flagstruct, &
                       FV_Atm(1)%neststruct, FV_Atm(1)%idiag, FV_Atm(1)%bd, FV_Atm(1)%parent_grid,FV_Atm(1)%domain      )
-
-
- ! MPP nulify
- ! ----------
- call nullify_domain()
 
 
  !Copy from fv3 back to pert structure
@@ -629,11 +593,6 @@ subroutine step_ad(self,conf,traj,pert)
  !-----------------------------------------
  call traj_to_fv3(self,conf,traj)
  call pert_to_fv3(self,conf,pert)
-
-
- ! MPP set domain
- ! --------------
- call set_domain(FV_Atm(1)%domain)
 
 
  ! Initilize the module level checkpointing
@@ -806,11 +765,6 @@ subroutine step_ad(self,conf,traj,pert)
  call mpp_get_boundary_ad( FV_AtmP(1)%up, FV_AtmP(1)%vp, FV_Atm(1)%domain, &
                            wbuffery=self%wbuffery, ebuffery=self%ebuffery, sbufferx=self%sbufferx, nbufferx=self%nbufferx, &
                            gridtype=DGRID_NE, complete=.true. )
-
-
- ! MPP nulify
- ! ----------
- call nullify_domain()
 
 
  !A-grid winds are diagnostic
@@ -1336,5 +1290,187 @@ enddo
 end subroutine a_to_d_nl
 
 ! ------------------------------------------------------------------------------
+
+! This subroutine is taken from IO/FV3Restart/fv3jedi_io_fms2_mod.f90 in fv3-jedi repo
+subroutine fv3jedi_register_field(fileobj, io_name_in, array, position, is_restart, long_name, units)
+
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj
+  character(len=*), intent(in)               :: io_name_in
+  real(kind=kind_real), intent(in)           :: array(:,:,:)
+  integer, intent(in)                        :: position
+  logical, intent(in)                        :: is_restart
+  character(len=*), optional, intent(in)     :: long_name
+  character(len=*), optional, intent(in)     :: units
+
+  logical :: is_open, is_registered
+  integer :: ndims, idim, num_zaxes, nz_dim, nz_field, array_shape(3)
+  character(len=8) :: xdim_name, ydim_name, zdim_name
+  character(len=8), dimension(:), allocatable :: dim_names
+  character(len=2048) :: io_name
+
+  io_name = trim(io_name_in)
+
+  if ( fileobj%is_readonly ) then ! For read
+     ! Get variable dimensions
+     ndims = get_variable_num_dimensions(fileobj, trim(io_name))
+     allocate(dim_names(ndims))
+     call get_variable_dimension_names(fileobj, trim(io_name), dim_names)
+
+     ! Register x-axis
+     if ( .not. is_dimension_registered(fileobj, trim(dim_names(1))) ) then
+        if ( position /= north ) then
+           call register_axis(fileobj, trim(dim_names(1)), 'x', domain_position=position)
+        else
+           call register_axis(fileobj, trim(dim_names(1)), 'x', domain_position=center)
+        end if
+     end if
+
+     ! Register y-axis
+     if ( .not. is_dimension_registered(fileobj, trim(dim_names(2))) ) then
+        if ( position /= east ) then
+           call register_axis(fileobj, trim(dim_names(2)), 'y', domain_position=position)
+        else
+           call register_axis(fileobj, trim(dim_names(2)), 'y', domain_position=center)
+        end if
+     end if
+
+     ! Register restart field
+     if ( is_restart ) then
+        call register_restart_field(fileobj, trim(io_name), array)
+     end if
+  else ! For write
+
+     ! Register x-axis
+     ! ---------------
+
+     is_registered = .false.
+     do idim = 1,fileobj%nx
+        if ( fileobj%xdims(idim)%pos == position ) then
+           is_registered = .true.
+           xdim_name = trim(fileobj%xdims(idim)%varname)
+           exit
+        end if
+     end do
+
+     if ( .not. is_registered ) then
+        write (xdim_name,'(A,I0)') 'xaxis_', fileobj%nx+1
+
+        if ( position /= north ) then
+           call register_axis(fileobj, trim(xdim_name), 'x', domain_position=position)
+        else
+           call register_axis(fileobj, trim(xdim_name), 'x', domain_position=center)
+        end if
+
+        call register_field(fileobj, trim(xdim_name), 'double', (/ trim(xdim_name) /))
+        call register_variable_attribute(fileobj, trim(xdim_name), 'long_name', trim(xdim_name), str_len=len(trim(xdim_name)))
+        call register_variable_attribute(fileobj, trim(xdim_name), 'units', 'none', str_len=len('none'))
+        call register_variable_attribute(fileobj, trim(xdim_name), 'cartesian_axis', 'X', str_len=len('X'))
+     end if
+
+     ! Register y-axis
+     ! ---------------
+
+     is_registered = .false.
+     do idim = 1,fileobj%ny
+        if ( fileobj%ydims(idim)%pos == position ) then
+           is_registered = .true.
+           ydim_name = trim(fileobj%ydims(idim)%varname)
+           exit
+        end if
+     end do
+
+     if ( .not. is_registered ) then
+        write (ydim_name,'(A,I0)') 'yaxis_', fileobj%ny+1
+
+        if ( position /= east ) then
+           call register_axis(fileobj, trim(ydim_name), 'y', domain_position=position)
+        else
+           call register_axis(fileobj, trim(ydim_name), 'y', domain_position=center)
+        end if
+
+        call register_field(fileobj, trim(ydim_name), 'double', (/ trim(ydim_name) /))
+        call register_variable_attribute(fileobj, trim(ydim_name), 'long_name', trim(ydim_name), str_len=len(trim(ydim_name)))
+        call register_variable_attribute(fileobj, trim(ydim_name), 'units', 'none', str_len=len('none'))
+        call register_variable_attribute(fileobj, trim(ydim_name), 'cartesian_axis', 'Y', str_len=len('Y'))
+     end if
+
+     ! Register z-axis
+     ! ---------------
+
+     ! Count length of third array dimension
+     array_shape = shape(array)
+     nz_field = array_shape(3)
+
+     if ( nz_field > 1 ) then
+        ndims = get_num_dimensions(fileobj)
+        allocate(dim_names(ndims))
+        call get_dimension_names(fileobj, dim_names)
+
+        num_zaxes = 0
+        is_registered = .false.
+        do idim = 1,ndims
+           if ( dim_names(idim)(1:6) == 'zaxis_' ) then
+              call get_dimension_size(fileobj, trim(dim_names(idim)), nz_dim)
+              if ( nz_dim == nz_field ) then
+                 is_registered = .true.
+                 zdim_name = trim(dim_names(idim))
+                 exit
+              end if
+
+              num_zaxes = num_zaxes + 1
+           end if
+        end do
+
+        if ( .not. is_registered) then
+           if ( num_zaxes+1 > 99 ) then
+              call abor1_ftn('fv3jedi_io_fms_mod.fv3jedi_register_field: only 99 z-axes permitted for write.')
+           end if
+           write (zdim_name,'(A,I0)') 'zaxis_', num_zaxes+1
+
+           call register_axis(fileobj, trim(zdim_name), nz_field)
+
+           call register_field(fileobj, trim(zdim_name), 'double', (/ trim(zdim_name) /))
+           call register_variable_attribute(fileobj, trim(zdim_name), 'long_name', trim(zdim_name), str_len=len(trim(zdim_name)))
+           call register_variable_attribute(fileobj, trim(zdim_name), 'units', 'none', str_len=len('none'))
+           call register_variable_attribute(fileobj, trim(zdim_name), 'cartesian_axis', 'Z', str_len=len('Z'))
+        end if
+     end if
+
+     ! Register time-axis
+     if ( .not. dimension_exists(fileobj, 'Time') ) then
+        call register_axis(fileobj, 'Time', unlimited)
+
+        call register_field(fileobj, 'Time', 'double', (/ 'Time' /))
+        call register_variable_attribute(fileobj, 'Time', 'long_name', 'Time', str_len=len('Time'))
+        call register_variable_attribute(fileobj, 'Time', 'units', 'time level', str_len=len('time level'))
+        call register_variable_attribute(fileobj, 'Time', 'cartesian_axis', 'T', str_len=len('T'))
+     end if
+
+     ! Register restart field
+     if ( is_restart ) then
+        if ( nz_field > 1 ) then
+           call register_restart_field(fileobj, trim(io_name), array, (/ xdim_name, ydim_name, zdim_name, 'Time    '/))
+        else
+           call register_restart_field(fileobj, trim(io_name), array, (/ xdim_name, ydim_name, 'Time    '/))
+        end if
+     else
+        if ( nz_field > 1 ) then
+           call register_field(fileobj, trim(io_name), 'double', (/ xdim_name, ydim_name, zdim_name, 'Time    '/))
+        else
+           call register_field(fileobj, trim(io_name), 'double', (/ xdim_name, ydim_name, 'Time    '/))
+        end if
+     end if
+
+     ! Set field attributes
+     if ( present(long_name) ) then
+        call register_variable_attribute(fileobj, trim(io_name), 'long_name', trim(long_name), str_len=len(trim(long_name)))
+     endif
+     if ( present(units) ) then
+        call register_variable_attribute(fileobj, trim(io_name), 'units', trim(units), str_len=len(trim(units)))
+     end if
+
+  end if
+
+end subroutine fv3jedi_register_field
 
 end module fv3jedi_lm_dynamics_mod

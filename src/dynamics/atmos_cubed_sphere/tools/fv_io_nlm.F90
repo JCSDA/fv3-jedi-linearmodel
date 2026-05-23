@@ -36,7 +36,6 @@ module fv_io_nlm_mod
                                      open_file, close_file, &
                                      register_restart_field, read_restart, write_restart, &
                                      file_exists, variable_exists, set_filename_appendix
-  use fms_mod,                 only: set_domain, nullify_domain
   use mpp_mod,                 only: mpp_error, FATAL, NOTE, WARNING, mpp_root_pe, &
                                      mpp_sync, mpp_pe, mpp_declare_pelist
   use mpp_domains_mod,         only: domain2d, EAST, WEST, NORTH, CENTER, SOUTH, CORNER, &
@@ -690,8 +689,6 @@ contains
     ntdiag=size(Atm%qdiag,4)
     ntracers=ntprog+ntdiag
 
-    call set_domain(Atm%domain)
-
     if (open_file(Atm%neststruct%BCfile_ne, fname_ne, 'read', Atm%domain, is_restart=.true.)) then
     endif
     if (open_file(Atm%neststruct%BCfile_sw, fname_sw, 'read', Atm%domain, is_restart=.true.)) then
@@ -755,8 +752,6 @@ contains
 
     fname_ne = 'fv_BC_ne.res.nc'
     fname_sw = 'fv_BC_sw.res.nc'
-
-    call set_domain(Atm%domain)
 
     if (is_master()) print*, 'fv_io_register_restart_BCs_NH: REGISTERING NH BCs', Atm%flagstruct%hydrostatic, Atm%flagstruct%make_nh
 #ifndef SW_DYNAMICS

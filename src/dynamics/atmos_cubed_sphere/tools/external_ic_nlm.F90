@@ -5,7 +5,7 @@ module external_ic_nlm_mod
 #endif
 
 #ifndef DYCORE_SOLO
-   use amip_interp_mod,    only: i_sst, j_sst, sst_ncep
+   use external_sst_nlm_mod, only: i_sst, j_sst, sst_ncep, big_number
 #endif
    use fv_arrays_nlm_mod,  only: REAL4, REAL8, FVPRC
    use mpp_mod,            only: mpp_error, FATAL, NOTE, mpp_broadcast,mpp_npes
@@ -1991,6 +1991,11 @@ contains
       real(FVPRC):: c1, c2, c3, c4
       integer i,j, i1, i2, jc, i0, j0, it, jt
 
+      if (.not. allocated (sst_ncep)) then
+         allocate (sst_ncep(i_sst,j_sst))
+         sst_ncep(:,:) = big_number
+      endif
+
       do i=1,im-1
          rdlon(i) = 1. / (lon(i+1) - lon(i))
       enddo
@@ -1999,7 +2004,7 @@ contains
       do j=1,jm-1
          rdlat(j) = 1. / (lat(j+1) - lat(j))
       enddo
-
+      
 ! * Interpolate to "FMS" 1x1 SST data grid
 ! lon: 0.5, 1.5, ..., 359.5
 ! lat: -89.5, -88.5, ... , 88.5, 89.5

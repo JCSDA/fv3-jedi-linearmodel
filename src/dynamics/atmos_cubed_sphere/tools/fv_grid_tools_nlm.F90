@@ -50,12 +50,11 @@ module fv_grid_tools_nlm_mod
                                BGRID_SW_PARAM=>BGRID_SW, & 
                                SCALAR_PAIR,              &
                                CORNER, CENTER, XUPDATE
-  use fms_mod,           only: get_mosaic_tile_grid
   use fms2_io_mod,       only: FmsNetcdfFile_t, open_file, close_file, &
                                read_data, file_exists, variable_exists, &
                                get_global_attribute, get_variable_attribute, &
-                               global_att_exists
-  use mosaic_mod,       only : get_mosaic_ntiles
+                               global_att_exists, get_mosaic_tile_grid
+  use mosaic2_mod, only: get_mosaic_ntiles
 
   use mpp_mod, only: mpp_transmit, mpp_recv
   implicit none
@@ -156,7 +155,7 @@ contains
     endif
 
     !FIXME: Doesn't work for a nested grid
-    ntiles = get_mosaic_ntiles(atm_mosaic)
+    ntiles = get_mosaic_ntiles(fileobj)
     if(ntiles .NE. 6) call mpp_error(FATAL, &
        'fv_grid_tools(read_grid): ntiles should be 6 in mosaic file '//trim(atm_mosaic) )
     if(nregions .NE. 6) call mpp_error(FATAL, &

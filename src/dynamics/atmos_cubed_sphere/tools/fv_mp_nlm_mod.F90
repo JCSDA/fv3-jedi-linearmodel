@@ -48,7 +48,6 @@
       use mpp_domains_mod, only : group_halo_update_type => mpp_group_update_type
       use mpp_parameter_mod, only : WUPDATE, EUPDATE, SUPDATE, NUPDATE, XUPDATE, YUPDATE
       use fv_arrays_nlm_mod, only: fv_atmos_type
-      use fms_mod, only: set_domain
       use mpp_mod, only : mpp_get_current_pelist, mpp_set_current_pelist
       use mpp_domains_mod, only : mpp_define_domains
       use mpp_domains_mod, only : mpp_define_nest_domains, nest_domain_type
@@ -95,7 +94,7 @@
       public domain_decomp, mp_bcst, mp_reduce_max, mp_reduce_sum, mp_gather
       public mp_reduce_min
       public fill_corners, XDir, YDir
-      public switch_current_domain, switch_current_Atm, broadcast_domains
+      public broadcast_domains
       public is_master, setup_master
       !The following variables are declared public by this module for convenience;
       !they will need to be switched when domains are switched
@@ -917,48 +916,6 @@ subroutine broadcast_domains(Atm)
      end do
 
 end subroutine broadcast_domains
-
-subroutine switch_current_domain(new_domain,new_domain_for_coupler)
-
-  type(domain2D), intent(in), target :: new_domain, new_domain_for_coupler
-  logical, parameter :: debug = .FALSE.
-
-  !--- find the tile number
-  !tile = mpp_pe()/npes_per_tile+1 
-  !ntiles = mpp_get_ntile_count(new_domain)
-  call mpp_get_compute_domain( new_domain, is,  ie,  js,  je  )
-  isc = is ; jsc = js
-  iec = ie ; jec = je
-  call mpp_get_data_domain   ( new_domain, isd, ied, jsd, jed )
-!  if ( npes_x==npes_y .and. (npx-1)==((npx-1)/npes_x)*npes_x )  square_domain = .true.
-
-!  if (debug .AND. (gid==masterproc)) write(*,200) tile, is, ie, js, je
-!200 format('New domain: ', i4.4, ' ', i4.4, ' ', i4.4, ' ', i4.4, ' ', i4.4, ' ')
-
-  call set_domain(new_domain)
-
-
-end subroutine switch_current_domain
-
-subroutine switch_current_Atm(new_Atm, switch_domain)
-
-  type(fv_atmos_type), intent(IN), target :: new_Atm
-  logical, intent(IN), optional :: switch_domain
-  logical, parameter :: debug = .false.
-  logical :: swD
-
-  if (debug .AND. (gid==masterproc)) print*, 'SWITCHING ATM STRUCTURES', new_Atm%grid_number
-  if (present(switch_domain)) then
-     swD = switch_domain
-  else
-     swD = .true.
-  end if
-  if (swD) call switch_current_domain(new_Atm%domain, new_Atm%domain_for_coupler)
-
-!!$  if (debug .AND. (gid==masterproc)) WRITE(*,'(A, 6I5)') 'NEW GRID DIMENSIONS: ', &
-!!$       isd, ied, jsd, jed, new_Atm%npx, new_Atm%npy
-
-end subroutine switch_current_Atm
 
 !-------------------------------------------------------------------------------
 ! vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv !!

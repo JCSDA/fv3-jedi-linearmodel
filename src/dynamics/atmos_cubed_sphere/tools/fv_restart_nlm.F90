@@ -40,7 +40,7 @@ module fv_restart_nlm_mod
   use mpp_domains_mod,     only: mpp_update_domains, domain2d, DGRID_NE
   use mpp_mod,             only: mpp_chksum, stdout, mpp_error, FATAL, NOTE, get_unit, mpp_sum
   use test_cases_nlm_mod,      only: test_case, alpha, init_case, init_double_periodic, init_latlon
-  use fv_mp_nlm_mod,           only: is_master, switch_current_Atm, mp_reduce_min, mp_reduce_max
+  use fv_mp_nlm_mod,           only: is_master, mp_reduce_min, mp_reduce_max
   use fv_surf_map_nlm_mod,     only: sgh_g, oro_g
   use tracer_manager_mod,  only: get_tracer_names
   use field_manager_mod,   only: MODEL_ATMOS
@@ -199,7 +199,6 @@ contains
 
        endif
        !This call still appears to be necessary to get isd, etc. correct
-       call switch_current_Atm(Atm(n))
 
     npz     = Atm(1)%npz
     npz_rst = Atm(1)%flagstruct%npz_rst

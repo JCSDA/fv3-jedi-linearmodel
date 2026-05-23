@@ -25,11 +25,12 @@ integer :: i_sst = -1
 integer :: j_sst = -1
 logical :: forecast_mode = .false.
 logical :: use_ncep_sst  = .false.
-real, allocatable, dimension(:,:) ::  sst_ncep, sst_anom
 #else
-use amip_interp_mod, only: i_sst, j_sst, sst_ncep, sst_anom, &
-                           forecast_mode, use_ncep_sst
+use amip_interp_mod, only: i_sst, j_sst, forecast_mode, use_ncep_sst
 #endif
+
+real(8), allocatable, dimension(:,:) ::  sst_ncep, sst_anom
+real(8) :: big_number = 1.D+30
 
 public i_sst, j_sst, sst_ncep, sst_anom, forecast_mode, use_ncep_sst
 
