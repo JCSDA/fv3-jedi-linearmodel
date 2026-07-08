@@ -9,7 +9,7 @@
 
 cmake_minimum_required( VERSION 3.3.2 FATAL_ERROR )
 
-project( fv3jedilm VERSION 1.5.0 LANGUAGES Fortran C )
+project( fv3jedilm VERSION 1.8.0 LANGUAGES Fortran C )
 
 set( CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH} )
 
